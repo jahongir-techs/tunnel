@@ -25,7 +25,9 @@ def register_colab():
     
     print(f"✅ New Colab URL registered: {current_colab_url}")
     return jsonify({"message": "Colab URL updated", "url": current_colab_url})
-
+@app.route('/')
+def asfhj():
+    return redirect("/asosiy")
 @app.route('/<path:path>', methods=['GET', 'POST'])
 def proxy(path):
     """Foydalanuvchidan kelgan so‘rovni Colab’ga uzatadi"""
