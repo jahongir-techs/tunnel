@@ -1,35 +1,47 @@
-from flask import Flask, request, jsonify
-import numpy as np
-import tensorflow as tf
-from PIL import Image
-import io
+from flask import Flask, request, jsonify, redirect
+import requests
+from threading import Lock
 
 app = Flask(__name__)
 
-# TensorFlow Lite modelni yuklash
-interpreter = tf.lite.Interpreter(model_path="yolov8n_float32.tflite")
-interpreter.allocate_tensors()
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
+SECRET_TOKEN = "aerhnszlgjderfhuil"
+current_colab_url = None
+lock = Lock()
 
-@app.route("/predict", methods=["POST"])
-def predict():
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+@app.route('/register_colab', methods=['POST'])
+def register_colab():
+    """Colab tomonidan yuborilgan ngrok manzilni qabul qiladi"""
+    global current_colab_url
+    data = request.get_json(force=True)
+    if not data or data.get('token') != SECRET_TOKEN:
+        return jsonify({"error": "Access denied"}), 403
+    
+    new_url = data.get('url')
+    if not new_url:
+        return jsonify({"error": "URL not provided"}), 400
+    
+    with lock:
+        current_colab_url = new_url.rstrip('/')
+    
+    print(f"✅ New Colab URL registered: {current_colab_url}")
+    return jsonify({"message": "Colab URL updated", "url": current_colab_url})
 
-    file = request.files["file"].read()
-    img = Image.open(io.BytesIO(file)).resize(
-        (input_details[0]['shape'][2], input_details[0]['shape'][1])
-    )
-    # Normalizatsiya (0-1 oraliqqa)
-    input_data = np.expand_dims(np.array(img, dtype=np.float32) / 255.0, axis=0)
+@app.route('/<path:path>', methods=['GET', 'POST'])
+def proxy(path):
+    """Foydalanuvchidan kelgan so‘rovni Colab’ga uzatadi"""
+    global current_colab_url
+    if not current_colab_url:
+        return jsonify({"error": "Colab server not connected"}), 503
+    
+    target_url = f"{current_colab_url}/{path}"
+    try:
+        if request.method == 'POST':
+            resp = requests.post(target_url, data=request.form, files=request.files)
+        else:
+            resp = requests.get(target_url, params=request.args)
+        return (resp.content, resp.status_code, resp.headers.items())
+    except Exception as e:
+        return jsonify({"error": f"Proxy error: {str(e)}"}), 500
 
-    interpreter.set_tensor(input_details[0]['index'], input_data)
-    interpreter.invoke()
-    output_data = interpreter.get_tensor(output_details[0]['index'])
-
-    return jsonify({"prediction": output_data.tolist()})
-
-if __name__ == "__main__":
-    # Flask serverni ishga tushirish
-    app.run(host="0.0.0.0", port=5000)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
