@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, redirect, Response
 import requests
 from threading import Lock
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)  # static_folder o‘chirildi
 
 SECRET_TOKEN = "aerhnszlgjderfhuil"
 current_colab_url = None
@@ -25,12 +25,15 @@ def register_colab():
     print(f"✅ New Colab URL registered: {current_colab_url}")
     return jsonify({"message": "Colab URL updated", "url": current_colab_url})
 
+
 @app.route('/')
 def home():
     return redirect("/asosiy")
 
+
 @app.route('/<path:path>', methods=['GET', 'POST'])
 def proxy(path):
+    """Foydalanuvchidan kelgan barcha so‘rovlarni Colab’ga yo‘naltiradi."""
     global current_colab_url
     if not current_colab_url:
         return jsonify({"error": "Colab server not connected"}), 503
@@ -38,7 +41,7 @@ def proxy(path):
     target_url = f"{current_colab_url}/{path}"
 
     try:
-        # Cookie’larni uzatish
+        # Cookie uzatish
         cookies = request.cookies
 
         # So‘rov yuborish
@@ -58,7 +61,7 @@ def proxy(path):
                 allow_redirects=False
             )
 
-        # Foydalanuvchiga cookie va status bilan qaytarish
+        # Foydalanuvchiga javobni qaytarish
         response = Response(resp.content, resp.status_code)
         for key, value in resp.headers.items():
             if key.lower() == 'set-cookie':
@@ -70,6 +73,25 @@ def proxy(path):
 
     except Exception as e:
         return jsonify({"error": f"Proxy error: {str(e)}"}), 500
+
+
+# 🔥 static fayllar uchun ham yo‘l — bu ham Colab’ga boradi
+@app.route('/static/<path:filename>')
+def proxy_static(filename):
+    global current_colab_url
+    if not current_colab_url:
+        return jsonify({"error": "Colab server not connected"}), 503
+
+    target_url = f"{current_colab_url}/static/{filename}"
+    try:
+        resp = requests.get(target_url, stream=True)
+        response = Response(resp.content, resp.status_code)
+        # Fayl turi (mimetype)ni ham Colab’dan olish
+        response.headers["Content-Type"] = resp.headers.get("Content-Type", "application/octet-stream")
+        return response
+    except Exception as e:
+        return jsonify({"error": f"Static proxy error: {str(e)}"}), 500
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
